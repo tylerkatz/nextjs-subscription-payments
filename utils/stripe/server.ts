@@ -9,9 +9,7 @@ import {
   getErrorRedirect,
   calculateTrialEndUnixTimestamp
 } from '@/utils/helpers';
-import { Tables } from '@/types_db';
-
-type Price = Tables<'prices'>;
+import type { Price } from '@/utils/stripe/subscriptions';
 
 type CheckoutResponse = {
   errorRedirect?: string;
@@ -60,26 +58,20 @@ export async function checkoutWithStripe(
           quantity: 1
         }
       ],
-      cancel_url: getURL(),
-      success_url: getURL(redirectPath)
+      subscription_data: {
+        metadata: {
+          tier: (price.metadata as any)?.tier,
+          display_name: `MyNextSaaS ${(price.metadata as any)?.tier === 'basic' ? 'Basic' : 'Pro'}`
+        }
+      },
+      mode: 'subscription',
+      cancel_url: `${getURL()}/stripe/callback?error=user_cancelled`,
+      success_url: `${getURL()}/stripe/callback`
     };
 
-    console.log(
-      'Trial end:',
-      calculateTrialEndUnixTimestamp(price.trial_period_days)
-    );
-    if (price.type === 'recurring') {
-      params = {
-        ...params,
-        mode: 'subscription',
-        subscription_data: {
-          trial_end: calculateTrialEndUnixTimestamp(price.trial_period_days)
-        }
-      };
-    } else if (price.type === 'one_time') {
-      params = {
-        ...params,
-        mode: 'payment'
+    if (price.trial_period_days) {
+      params.subscription_data = {
+        trial_end: calculateTrialEndUnixTimestamp(price.trial_period_days)
       };
     }
 
@@ -177,5 +169,49 @@ export async function createStripePortal(currentPath: string) {
         'Please try again later or contact a system administrator.'
       );
     }
+  }
+}
+
+export async function updateSubscriptionPlan(
+  subscriptionId: string,
+  priceId: string,
+  immediateUpdate: boolean = false
+): Promise<void> {
+  try {
+    // Check if this is a free subscription (only exists in our DB)
+    if (subscriptionId.startsWith('free_')) {
+      // Create a new subscription instead of updating
+      const response = await checkoutWithStripe({ id: priceId } as Price, '/account');
+      if (response.errorRedirect) {
+        throw new Error('Failed to create subscription');
+      }
+      return;
+    }
+
+    // Otherwise, proceed with normal subscription update
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    
+    const schedule = await stripe.subscriptionSchedules.create({
+      from_subscription: subscriptionId
+    });
+
+    const phases = [{
+      start_date: immediateUpdate ? 'now' as 'now' : subscription.current_period_end,
+      items: [{
+        price: priceId,
+        quantity: 1
+      }],
+      payment_behavior: 'error_if_incomplete',
+      proration_behavior: (immediateUpdate ? 'always_invoice' : 'none') as any
+    }];
+
+    await stripe.subscriptionSchedules.update(schedule.id, {
+      end_behavior: 'release',
+      phases
+    });
+
+  } catch (error) {
+    console.error('Error updating subscription:', error);
+    throw new Error('Unable to update subscription.');
   }
 }

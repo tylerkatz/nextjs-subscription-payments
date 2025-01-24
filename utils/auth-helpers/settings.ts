@@ -1,27 +1,50 @@
-// Boolean toggles to determine which auth types are allowed
-const allowOauth = true;
-const allowEmail = true;
-const allowPassword = true;
+// Auth configuration types
+interface AuthConfig {
+  methods: {
+    oauth: boolean;
+    email: boolean;
+    password: boolean;
+  };
+  routing: {
+    useServerRedirect: boolean;
+  };
+}
 
-// Boolean toggle to determine whether auth interface should route through server or client
-// (Currently set to false because screen sometimes flickers with server redirects)
-const allowServerRedirect = false;
+// Main configuration object
+const AUTH_CONFIG: AuthConfig = {
+  methods: {
+    oauth: true,
+    email: true,
+    password: true
+  },
+  routing: {
+    useServerRedirect: false // Disabled due to screen flicker with server redirects
+  }
+} as const;
 
-// Check that at least one of allowPassword and allowEmail is true
-if (!allowPassword && !allowEmail)
-  throw new Error('At least one of allowPassword and allowEmail must be true');
-
-export const getAuthTypes = () => {
-  return { allowOauth, allowEmail, allowPassword };
+// Validation function
+const validateConfig = (config: AuthConfig): void => {
+  if (!config.methods.email && !config.methods.password) {
+    throw new Error('At least one of email or password authentication must be enabled');
+  }
 };
+
+// Validate on initialization
+validateConfig(AUTH_CONFIG);
+
+// Export helpers
+export const getAuthTypes = () => AUTH_CONFIG.methods;
+export const getAuthRouting = () => AUTH_CONFIG.routing;
+export const isMethodEnabled = (method: keyof AuthConfig['methods']) => 
+  AUTH_CONFIG.methods[method];
 
 export const getViewTypes = () => {
   // Define the valid view types
   let viewTypes: string[] = [];
-  if (allowEmail) {
+  if (AUTH_CONFIG.methods.email) {
     viewTypes = [...viewTypes, 'email_signin'];
   }
-  if (allowPassword) {
+  if (AUTH_CONFIG.methods.password) {
     viewTypes = [
       ...viewTypes,
       'password_signin',
@@ -36,7 +59,7 @@ export const getViewTypes = () => {
 
 export const getDefaultSignInView = (preferredSignInView: string | null) => {
   // Define the default sign in view
-  let defaultView = allowPassword ? 'password_signin' : 'email_signin';
+  let defaultView = AUTH_CONFIG.methods.password ? 'password_signin' : 'email_signin';
   if (preferredSignInView && getViewTypes().includes(preferredSignInView)) {
     defaultView = preferredSignInView;
   }
@@ -45,5 +68,5 @@ export const getDefaultSignInView = (preferredSignInView: string | null) => {
 };
 
 export const getRedirectMethod = () => {
-  return allowServerRedirect ? 'server' : 'client';
+  return AUTH_CONFIG.routing.useServerRedirect ? 'server' : 'client';
 };

@@ -5,7 +5,9 @@ import {
   upsertPriceRecord,
   manageSubscriptionStatusChange,
   deleteProductRecord,
-  deletePriceRecord
+  deletePriceRecord,
+  cancelBasicSubscription,
+  upsertSubscriptionSchedule
 } from '@/utils/supabase/admin';
 
 const relevantEvents = new Set([
@@ -18,7 +20,12 @@ const relevantEvents = new Set([
   'checkout.session.completed',
   'customer.subscription.created',
   'customer.subscription.updated',
-  'customer.subscription.deleted'
+  'customer.subscription.deleted',
+  'subscription_schedule.created',
+  'subscription_schedule.updated',
+  'subscription_schedule.canceled',
+  'subscription_schedule.released',
+  'subscription_schedule.completed'
 ]);
 
 export async function POST(req: Request) {
@@ -55,14 +62,33 @@ export async function POST(req: Request) {
           await deleteProductRecord(event.data.object as Stripe.Product);
           break;
         case 'customer.subscription.created':
-        case 'customer.subscription.updated':
-        case 'customer.subscription.deleted':
           const subscription = event.data.object as Stripe.Subscription;
+          const customerId = subscription.customer as string;
+          
+          const customerData = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+          if (customerData.metadata?.supabaseUUID) {
+            await cancelBasicSubscription(customerData.metadata.supabaseUUID);
+          }
+          
           await manageSubscriptionStatusChange(
             subscription.id,
-            subscription.customer as string,
-            event.type === 'customer.subscription.created'
+            customerId,
+            true
           );
+          break;
+        case 'customer.subscription.updated':
+        case 'customer.subscription.deleted':
+          const subscriptionUpdated = event.data.object as Stripe.Subscription;
+          await manageSubscriptionStatusChange(
+            subscriptionUpdated.id,
+            subscriptionUpdated.customer as string,
+            false
+          );
+          
+          // Log the status for debugging
+          console.log('Subscription status:', subscriptionUpdated.status);
+          console.log('Cancel at period end:', subscriptionUpdated.cancel_at_period_end);
+          console.log('Cancel at:', subscriptionUpdated.cancel_at);
           break;
         case 'checkout.session.completed':
           const checkoutSession = event.data.object as Stripe.Checkout.Session;
@@ -74,6 +100,14 @@ export async function POST(req: Request) {
               true
             );
           }
+          break;
+        case 'subscription_schedule.created':
+        case 'subscription_schedule.updated':
+        case 'subscription_schedule.canceled':
+        case 'subscription_schedule.released':
+        case 'subscription_schedule.completed':
+          const schedule = event.data.object as Stripe.SubscriptionSchedule;
+          await upsertSubscriptionSchedule(schedule);
           break;
         default:
           throw new Error('Unhandled relevant event!');

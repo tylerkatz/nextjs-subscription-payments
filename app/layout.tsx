@@ -19,9 +19,9 @@ export const metadata: Metadata = {
   }
 };
 
-export default async function RootLayout({ children }: PropsWithChildren) {
+export default function RootLayout({ children }: PropsWithChildren) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark">
       <body className="bg-black">
         <Navbar />
         <main

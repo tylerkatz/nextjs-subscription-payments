@@ -5,16 +5,21 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 import {
   getUserDetails,
+  getUser,
   getSubscription,
-  getUser
+  getProducts
 } from '@/utils/supabase/queries';
+import { createStripePortal } from '@/utils/stripe/server';
 
 export default async function Account() {
   const supabase = createClient();
-  const [user, userDetails, subscription] = await Promise.all([
+  
+  // Fetch all data on the server
+  const [user, userDetails, subscription, products] = await Promise.all([
     getUser(supabase),
     getUserDetails(supabase),
-    getSubscription(supabase)
+    getSubscription(supabase),
+    getProducts(supabase)
   ]);
 
   if (!user) {
@@ -34,7 +39,11 @@ export default async function Account() {
         </div>
       </div>
       <div className="p-4">
-        <CustomerPortalForm subscription={subscription} />
+        <CustomerPortalForm 
+          subscription={subscription} 
+          createPortal={createStripePortal}
+          products={products}
+        />
         <NameForm userName={userDetails?.full_name ?? ''} />
         <EmailForm userEmail={user.email} />
       </div>
