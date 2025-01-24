@@ -1,0 +1,88 @@
+{
+  "_meta": {
+    "template_version": 0
+  },
+  "fixtures": [
+    {
+      "name": "prod_basic",
+      "path": "/v1/products",
+      "method": "post",
+      "params": {
+        "name": "Platform Basic",
+        "description": "Basic platform access",
+        "metadata": {
+          "tier": "basic"
+        }
+      }
+    },
+    {
+      "name": "prod_pro",
+      "path": "/v1/products",
+      "method": "post",
+      "params": {
+        "name": "Platform Pro",
+        "description": "Advanced features and access",
+        "metadata": {
+          "tier": "pro"
+        }
+      }
+    },
+    {
+      "name": "price_basic_month",
+      "path": "/v1/prices",
+      "method": "post",
+      "params": {
+        "product": "${prod_basic:id}",
+        "nickname": "Monthly",
+        "currency": "usd",
+        "billing_scheme": "per_unit",
+        "unit_amount": 0,
+        "recurring": {
+          "interval": "month",
+          "interval_count": 1
+        },
+        "metadata": {
+          "tier": "basic"
+        }
+      }
+    },
+    {
+      "name": "price_pro_month",
+      "path": "/v1/prices",
+      "method": "post",
+      "params": {
+        "product": "${prod_pro:id}",
+        "nickname": "Monthly",
+        "currency": "usd",
+        "billing_scheme": "per_unit",
+        "unit_amount": 800,
+        "recurring": {
+          "interval": "month",
+          "interval_count": 1
+        },
+        "metadata": {
+          "tier": "pro"
+        }
+      }
+    },
+    {
+      "name": "price_pro_year",
+      "path": "/v1/prices",
+      "method": "post",
+      "params": {
+        "product": "${prod_pro:id}",
+        "nickname": "Yearly",
+        "currency": "usd",
+        "billing_scheme": "per_unit",
+        "unit_amount": 8000,
+        "recurring": {
+          "interval": "year",
+          "interval_count": 1
+        },
+        "metadata": {
+          "tier": "pro"
+        }
+      }
+    }
+  ]
+}

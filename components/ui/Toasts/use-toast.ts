@@ -6,8 +6,22 @@ import type {
   ToastProps
 } from '@/components/ui/Toasts/toast';
 
-const TOAST_LIMIT = 1;
-const TOAST_REMOVE_DELAY = 1000000;
+// Constants
+export const TOAST_LIMITS = {
+  MAX_TOASTS: 1,
+  REMOVE_DELAY: 5000,   // 5 seconds to remove from state
+  DEFAULT_DURATION: 3000 // 3 seconds visible by default
+} as const;
+
+// Types
+export type ToastType = 'success' | 'error' | 'warning' | 'info';
+
+interface ToastOptions {
+  title: string;
+  description?: string;
+  type?: ToastType;
+  duration?: number;
+}
 
 type ToasterToast = ToastProps & {
   id: string;
@@ -16,6 +30,15 @@ type ToasterToast = ToastProps & {
   action?: ToastActionElement;
 };
 
+// Map semantic types to UI variants
+const variantMap = {
+  success: 'default',   // Changed from undefined
+  error: 'destructive',
+  warning: 'default',   // Changed from 'warning'
+  info: 'default'       // Changed from undefined
+} as const;
+
+// Action types
 const actionTypes = {
   ADD_TOAST: 'ADD_TOAST',
   UPDATE_TOAST: 'UPDATE_TOAST',
@@ -23,37 +46,26 @@ const actionTypes = {
   REMOVE_TOAST: 'REMOVE_TOAST'
 } as const;
 
-let count = 0;
-
-function genId() {
-  count = (count + 1) % Number.MAX_SAFE_INTEGER;
-  return count.toString();
-}
-
 type ActionType = typeof actionTypes;
 
 type Action =
-  | {
-      type: ActionType['ADD_TOAST'];
-      toast: ToasterToast;
-    }
-  | {
-      type: ActionType['UPDATE_TOAST'];
-      toast: Partial<ToasterToast>;
-    }
-  | {
-      type: ActionType['DISMISS_TOAST'];
-      toastId?: ToasterToast['id'];
-    }
-  | {
-      type: ActionType['REMOVE_TOAST'];
-      toastId?: ToasterToast['id'];
-    };
+  | { type: ActionType['ADD_TOAST']; toast: ToasterToast }
+  | { type: ActionType['UPDATE_TOAST']; toast: Partial<ToasterToast> }
+  | { type: ActionType['DISMISS_TOAST']; toastId?: ToasterToast['id'] }
+  | { type: ActionType['REMOVE_TOAST']; toastId?: ToasterToast['id'] };
 
 interface State {
   toasts: ToasterToast[];
 }
 
+// Toast ID generation
+let count = 0;
+function genId() {
+  count = (count + 1) % Number.MAX_SAFE_INTEGER;
+  return count.toString();
+}
+
+// Toast state management
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
 const addToRemoveQueue = (toastId: string) => {
@@ -67,7 +79,7 @@ const addToRemoveQueue = (toastId: string) => {
       type: 'REMOVE_TOAST',
       toastId: toastId
     });
-  }, TOAST_REMOVE_DELAY);
+  }, TOAST_LIMITS.REMOVE_DELAY);
 
   toastTimeouts.set(toastId, timeout);
 };
@@ -77,7 +89,7 @@ export const reducer = (state: State, action: Action): State => {
     case 'ADD_TOAST':
       return {
         ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT)
+        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMITS.MAX_TOASTS)
       };
 
     case 'UPDATE_TOAST':
@@ -138,8 +150,7 @@ function dispatch(action: Action) {
   });
 }
 
-type Toast = Omit<ToasterToast, 'id'>;
-
+// Base toast function
 function toast({ ...props }: Toast) {
   const id = genId();
 
@@ -169,6 +180,34 @@ function toast({ ...props }: Toast) {
   };
 }
 
+// Semantic helper functions
+export const showToast = ({ 
+  title, 
+  description, 
+  type = 'info',
+  duration = TOAST_LIMITS.DEFAULT_DURATION
+}: ToastOptions) => {
+  return toast({
+    title,
+    description,
+    variant: variantMap[type],
+    duration
+  });
+};
+
+export const showSuccessToast = (title: string, description?: string) => 
+  showToast({ title, description, type: 'success' });
+
+export const showErrorToast = (title: string, description?: string) => 
+  showToast({ title, description, type: 'error' });
+
+export const showWarningToast = (title: string, description?: string) => 
+  showToast({ title, description, type: 'warning' });
+
+export const showInfoToast = (title: string, description?: string) => 
+  showToast({ title, description, type: 'info' });
+
+// Hook
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState);
 
@@ -188,5 +227,7 @@ function useToast() {
     dismiss: (toastId?: string) => dispatch({ type: 'DISMISS_TOAST', toastId })
   };
 }
+
+type Toast = Omit<ToasterToast, 'id'>;
 
 export { useToast, toast };

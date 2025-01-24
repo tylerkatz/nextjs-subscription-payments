@@ -2,7 +2,7 @@ import { toDateTime } from '@/utils/helpers';
 import { stripe } from '@/utils/stripe/config';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
-import type { Database, Tables, TablesInsert } from 'types_db';
+import type { Database, Tables, TablesInsert } from './types_db';
 
 type Product = Tables<'products'>;
 type Price = Tables<'prices'>;
@@ -49,7 +49,9 @@ const upsertPriceRecord = async (
     unit_amount: price.unit_amount ?? null,
     interval: price.recurring?.interval ?? null,
     interval_count: price.recurring?.interval_count ?? null,
-    trial_period_days: price.recurring?.trial_period_days ?? TRIAL_PERIOD_DAYS
+    trial_period_days: price.recurring?.trial_period_days ?? TRIAL_PERIOD_DAYS,
+    description: price.nickname ?? null,
+    metadata: price.metadata ?? {}
   };
 
   const { error: upsertError } = await supabaseAdmin
@@ -226,15 +228,28 @@ const manageSubscriptionStatusChange = async (
   const { id: uuid } = customerData!;
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
-    expand: ['default_payment_method']
+    expand: ['default_payment_method', 'items.data.price.product']
   });
-  // Upsert the latest status of the subscription object.
+
+  // Get the product ID from the subscription's first item's price
+  const product = subscription.items.data[0].price.product as Stripe.Product;
+
+  // Check for existing active subscription for this product
+  const { data: existingSubscription } = await supabaseAdmin
+    .from('subscriptions')
+    .select('id')
+    .eq('user_id', uuid)
+    .eq('product_id', product.id)
+    .in('status', ['active', 'trialing'])
+    .maybeSingle();
+
   const subscriptionData: TablesInsert<'subscriptions'> = {
-    id: subscription.id,
+    id: existingSubscription?.id || subscription.id, // Use existing subscription ID if found
     user_id: uuid,
     metadata: subscription.metadata,
     status: subscription.status,
     price_id: subscription.items.data[0].price.id,
+    product_id: product.id,
     //TODO check quantity on subscription
     // @ts-ignore
     quantity: subscription.quantity,
@@ -266,14 +281,14 @@ const manageSubscriptionStatusChange = async (
   const { error: upsertError } = await supabaseAdmin
     .from('subscriptions')
     .upsert([subscriptionData]);
+
   if (upsertError)
     throw new Error(`Subscription insert/update failed: ${upsertError.message}`);
   console.log(
-    `Inserted/updated subscription [${subscription.id}] for user [${uuid}]`
+    `Inserted/updated subscription [${subscriptionData.id}] for user [${uuid}]`
   );
 
   // For a new subscription copy the billing details to the customer object.
-  // NOTE: This is a costly operation and should happen at the very end.
   if (createAction && subscription.default_payment_method && uuid)
     //@ts-ignore
     await copyBillingDetailsToCustomer(
@@ -281,6 +296,67 @@ const manageSubscriptionStatusChange = async (
       subscription.default_payment_method as Stripe.PaymentMethod
     );
 };
+
+export const createManualSubscription = async (subscription: TablesInsert<'subscriptions'>) => {
+  const { error } = await supabaseAdmin
+    .from('subscriptions')
+    .upsert([subscription]);
+  
+  if (error) throw error;
+};
+
+export async function cancelBasicSubscription(userId: string) {
+  const { data: existingSubscriptions } = await supabaseAdmin
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active');
+
+  if (existingSubscriptions?.length ?? 0 > 0) {
+    const basicSub = existingSubscriptions?.find(sub => 
+      sub.product_id.startsWith('prod_basic') || 
+      sub.id.startsWith('free_')
+    );
+    
+    if (basicSub) {
+      await supabaseAdmin
+        .from('subscriptions')
+        .update({ status: 'canceled' })
+        .eq('id', basicSub.id);
+    }
+  }
+}
+
+export async function upsertSubscriptionSchedule(
+  schedule: Stripe.SubscriptionSchedule
+) {
+  if (schedule.status === 'released') {
+    const { error } = await supabaseAdmin
+      .from('subscription_schedules')
+      .delete()
+      .eq('id', schedule.id);
+
+    if (error) throw error;
+    console.log(`Subscription schedule ${schedule.id} deleted after release`);
+    return;
+  }
+
+  const scheduleData = {
+    id: schedule.id,
+    subscription_id: schedule.subscription as string,
+    current_phase: typeof schedule.current_phase === 'number' ? schedule.current_phase : 0,
+    phases: schedule.phases as any,
+    status: schedule.status as "not_started" | "active" | "completed" | "released" | "canceled",
+    updated: new Date().toISOString()
+  };
+
+  const { error } = await supabaseAdmin
+    .from('subscription_schedules')
+    .upsert(scheduleData);
+
+  if (error) throw error;
+  console.log(`Subscription schedule ${schedule.id} updated!`);
+}
 
 export {
   upsertProductRecord,

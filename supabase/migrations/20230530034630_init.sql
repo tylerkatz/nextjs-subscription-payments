@@ -21,9 +21,69 @@ create policy "Can update own user data." on users for update using (auth.uid() 
 */ 
 create function public.handle_new_user() 
 returns trigger as $$
+declare
+  basic_price_id text;
+  basic_product_id text;
 begin
+  -- Insert the user record
   insert into public.users (id, full_name, avatar_url)
   values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
+
+  -- Get the Basic tier price ID and product ID
+  SELECT p.id, p.product_id INTO basic_price_id, basic_product_id
+  FROM prices p
+  WHERE p.unit_amount = 0 
+  AND p.interval = 'month'
+  AND p.metadata->>'tier' = 'basic';
+
+  -- Raise notice for debugging
+  RAISE NOTICE 'Price ID: %, Product ID: %', basic_price_id, basic_product_id;
+
+  -- Check if we found the price
+  IF basic_price_id IS NULL THEN
+    RAISE EXCEPTION 'No basic tier price found';
+  END IF;
+
+  -- Check if we found the product
+  IF basic_product_id IS NULL THEN
+    RAISE EXCEPTION 'No product ID found for basic tier price';
+  END IF;
+
+  -- Create a subscription for the free tier
+  INSERT INTO public.subscriptions (
+    id,
+    user_id,
+    status,
+    price_id,
+    product_id,
+    quantity,
+    cancel_at_period_end,
+    created,
+    current_period_start,
+    current_period_end,
+    ended_at,
+    cancel_at,
+    canceled_at,
+    trial_start,
+    trial_end
+  ) VALUES (
+    concat('free_', NEW.id),
+    NEW.id,
+    'active',
+    basic_price_id,
+    basic_product_id,
+    1,
+    false,
+    timezone('utc'::text, now()),
+    timezone('utc'::text, now()),
+    '9999-12-31 23:59:59Z',
+    null,
+    null,
+    null,
+    null,
+    null
+  );
+
   return new;
 end;
 $$ language plpgsql security definer;
@@ -113,6 +173,8 @@ create table subscriptions (
   metadata jsonb,
   -- ID of the price that created this subscription.
   price_id text references prices,
+  -- Add direct product reference
+  product_id text references products not null,
   -- Quantity multiplied by the unit amount of the price creates the amount of the subscription. Can be used to charge multiple seats.
   quantity integer,
   -- If true the subscription has been canceled by the user and will be deleted at the end of the billing period.
@@ -134,8 +196,48 @@ create table subscriptions (
   -- If the subscription has a trial, the end of that trial.
   trial_end timestamp with time zone default timezone('utc'::text, now())
 );
+
+-- Create partial unique index for active subscriptions
+CREATE UNIQUE INDEX unique_active_subscription_per_product 
+ON subscriptions (user_id, product_id)
+WHERE (status = 'active' OR status = 'trialing');
+
 alter table subscriptions enable row level security;
 create policy "Can only view own subs data." on subscriptions for select using (auth.uid() = user_id);
+
+/**
+* SUBSCRIPTION SCHEDULES
+* Note: subscription schedules are created and managed in Stripe and synced to our DB via Stripe webhooks.
+*/
+create type schedule_status as enum ('not_started', 'active', 'completed', 'released', 'canceled');
+create table subscription_schedules (
+  -- Schedule ID from Stripe, e.g. sub_sched_1234
+  id text primary key,
+  -- The subscription this schedule belongs to
+  subscription_id text not null references subscriptions(id),
+  -- The zero-based index of the phase the subscription is currently in
+  current_phase integer not null,
+  -- Array of phases for this schedule
+  phases jsonb not null,
+  -- The status of the subscription schedule
+  status schedule_status not null,
+  -- Time at which the subscription schedule was created
+  created timestamp with time zone default timezone('utc'::text, now()) not null,
+  -- Time at which the subscription schedule was last updated
+  updated timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table subscription_schedules enable row level security;
+create policy "Can only view own schedule data." 
+  on subscription_schedules 
+  for select 
+  using (
+    auth.uid() = (
+      select user_id 
+      from subscriptions 
+      where subscriptions.id = subscription_schedules.subscription_id
+    )
+  );
 
 /**
  * REALTIME SUBSCRIPTIONS
