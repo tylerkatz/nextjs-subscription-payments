@@ -36,17 +36,38 @@ begin
   AND p.interval = 'month'
   AND p.metadata->>'tier' = 'basic';
 
-  -- Raise notice for debugging
-  RAISE NOTICE 'Price ID: %, Product ID: %', basic_price_id, basic_product_id;
+  -- If no basic tier exists, create it
+  IF basic_price_id IS NULL OR basic_product_id IS NULL THEN
+    -- Create basic product if it doesn't exist
+    INSERT INTO products (id, active, name, description, image, metadata)
+    VALUES (
+      'prod_basic',
+      true,
+      'Basic Plan',
+      'Free tier with basic features',
+      null,
+      '{"tier": "basic"}'::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id INTO basic_product_id;
 
-  -- Check if we found the price
-  IF basic_price_id IS NULL THEN
-    RAISE EXCEPTION 'No basic tier price found';
-  END IF;
-
-  -- Check if we found the product
-  IF basic_product_id IS NULL THEN
-    RAISE EXCEPTION 'No product ID found for basic tier price';
+    -- Create basic price if it doesn't exist
+    INSERT INTO prices (id, product_id, active, description, unit_amount, currency, type, interval, interval_count, trial_period_days, metadata)
+    VALUES (
+      'price_basic',
+      basic_product_id,
+      true,
+      'Free tier',
+      0,
+      'usd',
+      'recurring',
+      'month',
+      1,
+      null,
+      '{"tier": "basic"}'::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id INTO basic_price_id;
   END IF;
 
   -- Create a subscription for the free tier
