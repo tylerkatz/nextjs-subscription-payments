@@ -10,9 +10,10 @@ import s from './Navbar.module.css';
 
 interface NavlinksProps {
   user?: any;
+  subscription?: any;
 }
 
-export default function Navlinks({ user }: NavlinksProps) {
+export default function Navlinks({ user, subscription }: NavlinksProps) {
   const router = getRedirectMethod() === 'client' ? useRouter() : null;
 
   return (
@@ -26,9 +27,16 @@ export default function Navlinks({ user }: NavlinksProps) {
             Pricing
           </Link>
           {user && (
-            <Link href="/account" className={s.link}>
-              Account
-            </Link>
+            <>
+              <Link href="/account" className={s.link}>
+                Account
+              </Link>
+              {subscription?.status === 'active' && (
+                <Link href="/notes" className={s.link}>
+                  Notes
+                </Link>
+              )}
+            </>
           )}
         </nav>
       </div>
