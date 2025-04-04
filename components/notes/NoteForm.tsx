@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
+import { useNotes } from './NotesContext';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
 
@@ -15,18 +16,19 @@ interface NoteFormProps {
 }
 
 export default function NoteForm({ initialData }: NoteFormProps) {
+  const router = useRouter();
+  const { addNote, updateNote } = useNotes();
   const [title, setTitle] = useState(initialData?.title || '');
   const [content, setContent] = useState(initialData?.content || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const router = useRouter();
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
@@ -36,19 +38,25 @@ export default function NoteForm({ initialData }: NoteFormProps) {
       if (!user) throw new Error('No user found');
 
       if (initialData) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('notes')
           .update({ title, content })
           .eq('id', initialData.id)
-          .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .select()
+          .single();
 
         if (error) throw error;
+        if (data) updateNote(data);
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('notes')
-          .insert([{ title, content, user_id: user.id }]);
+          .insert([{ title, content, user_id: user.id }])
+          .select()
+          .single();
 
         if (error) throw error;
+        if (data) addNote(data);
       }
 
       router.push('/notes');
